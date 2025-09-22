@@ -1,8 +1,12 @@
 
+# funzioni ncurses
 .EXTERN initscr
 .EXTERN noecho
 .EXTERN refresh
 .EXTERN clear
+.EXTERN flushinp
+.EXTERN nodelay
+.EXTERN stdscr
 
 .GLOBAL main
 
@@ -51,12 +55,13 @@ pos_x_frutto:	.BYTE 7
 pos_y_frutto:	.BYTE 9
 punteggio:		.WORD 0
 
-messaggio1:		.ASCIZ "- Assembly Snake\n"
-messaggio1_2:   .ASCIZ "- Use wasd to move the snake and try to collect as many fruits as possible!!!!!!"
-messaggio1_3:   .ASCIZ "- Press q, in game, to quit the game.\n"
-messaggio2:		.ASCIZ "- Enter the time between snake's movements (in centiseconds): "
-messaggio3:		.ASCIZ "- Score: "
-messaggio4:		.ASCIZ "- You won!!!!\r\n- Score: "
+messaggio1:		.ASCII "- ASSEMBLY SNAKE\n"
+messaggio1_2:   .ASCII "- Use wasd to move the snake and try to collect as many fruits as possible!!!!!!"
+messaggio1_3:   .ASCII "- Press q, in game, to quit the game.\n"
+messaggio2:		.ASCII "- Enter the time between snake's movements (in centiseconds): "
+messaggio3:		.ASCII "- Score: "
+messaggio4:		.ASCII "- You won!!!!\n- Score: "
+messaggio5:		.ASCII "- Press q to exit.\n"
 
 
 
@@ -152,6 +157,7 @@ fine_main:
 
 		# il punteggio massimo e' ((17 * 17) - 3)
 		# se l'utente ha fatto quel punteggio, vuol dire che ha vinto
+
 		CMPW $286, punteggio
 		JAE gioco_vinto
 
@@ -163,7 +169,7 @@ fine_main:
 		JMP stampa_punteggio
 
 gioco_vinto:
-		MOV $24, %ECX  # "- You won!!!!\n- Score: " e' 24 caratteri
+		MOV $23, %ECX
 		LEA messaggio4, %EBX
 		CALL outmess
 
@@ -171,6 +177,15 @@ stampa_punteggio:
 		MOV punteggio, %AX
 		CALL outdecimal_word
 		CALL newline
+
+		# stampa messaggio per uscire
+		LEA messaggio5, %EBX
+		CALL outline
+
+carattere_uscita:
+		CALL inchar
+		CMP $'q', %AL
+		JNE carattere_uscita
 
 		CALL endwin  # per chiudere ncurses
 		MOV $0, %EAX  # return 0
@@ -342,6 +357,9 @@ inchar_delay:
 		INT $0x21
 		*/ # PROVVISORIO
 
+		CALL flushinp  # cancella l’input buffer di ncurses/terminale
+
+
 		# campioniamo il tempo iniziale
 		CALL ricava_tempo  # ritorna EDX secondi da Epoch, EAX microsecondi
 		MOV %EDX, sec_iniziali
@@ -353,6 +371,15 @@ inchar_delay:
 		MOV usec_iniziali, %EDX
 		ADD %EDX, %EAX  # EAX = EAX + usec_iniziali
 		MOV %EAX, usec_totali
+
+
+		# nodelay(stdscr, TRUE) per avere una lettura non bloccante
+		MOV $1, %EAX  # TRUE
+		PUSH %EAX
+		MOV stdscr, %EAX  # stdscr è una variabile globale
+		PUSH %EAX
+		CALL nodelay
+		ADD $8, %ESP  # ripristino stack
 		
 
 		MOV $0, %EDX  # servira' per ignorare i caratteri inseriti dopo, rispetto al primo inserito valido (wasd)
@@ -360,24 +387,13 @@ inchar_delay:
 loop_inchar_delay:
 		NOP
 
-		# controlliamo se un carattere e' presente nel buffer STDIN
+		# a questo punto getch è non bloccante
+		CALL getch  # ritorna carattere o ERR, che è -1
+		CMP $-1, %EAX
+		JE fine_loop_inchar_delay  # nessun carattere
 
-		/*
-		# Ritorna
-		# AL = 0x00 se nessun carattere e' disponibile
-		# AL = 0xFF se il carattere e' disponibile
-		MOV $0x0B, %AH
-		INT $0x21  # MODIFICA AL
-		NOP
-		*/
-		MOV $0, %AL  # PROVVISORIO
-
-		CMP $0xFF, %AL
-		JE controllo_carattere
-
-		# altrimenti AL si presume sia 0
-		# non fare nulla allora
-		JMP fine_loop_inchar_delay
+		# altrimenti c'è il carattere
+		JMP controllo_carattere
 
 controllo_carattere:
 
@@ -387,10 +403,6 @@ controllo_carattere:
 		JE carattere_non_valido  # APPUNTO NON SI MODIFICA BL
 
 		# -------------------------
-		# controlliamo il carattere
-		# poiche' e' presente possiamo fare una inchar che NON blocchera' l'esecuzione del programma
-		CALL inchar  # in AL ho il carattere
-
 		# controlliamo che sia tra 'wasd' o 'q'
 
 		# setto il terzo bit a prescindere (converto a minuscolo)
@@ -442,6 +454,8 @@ carattere_non_valido:
 		INT $0x21
 		*/  # PROVVISORIO
 
+		# CALL flushinp  # cancella l’input buffer di ncurses/terminale
+
 		# Note
 		# Se AL non contiene uno dei seguenti valori 01h,06h,07h,08h, oppure 0Ah, il buffer viene pulito ma non viene chiamata alcuna funzione di input
 
@@ -483,6 +497,14 @@ caso_secondi_iniziali_minore:
 		
 
 fine_inchar_delay:
+
+		# nodelay(stdscr, FALSE) per avere una lettura bloccante
+		MOV $0, %EAX  # FALSE
+		PUSH %EAX
+		MOV stdscr, %EAX  # stdscr è una variabile globale
+		PUSH %EAX
+		CALL nodelay
+		ADD $8, %ESP  # ripristino stack
 
 		POP %EAX
 		POP %ECX
